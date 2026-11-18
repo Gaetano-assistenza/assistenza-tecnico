@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Scheda tecnica strumento</title>
+<style>
+  :root { --acc:#4F46E5; --testo:#111827; --sec:#5B6472; --bordo:#D5D8DE; --sfondo:#F4F5F8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Segoe UI,system-ui,Arial,sans-serif; background:var(--sfondo); color:var(--testo); }
+  main { max-width:520px; margin:0 auto; padding:16px 14px 40px; }
+  .scheda { background:#fff; border:1px solid var(--bordo); border-radius:14px; padding:18px; margin-bottom:12px; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  .sotto { color:var(--sec); font-size:14px; margin:0; }
+  input[type=password] { width:100%; font:inherit; font-size:17px; padding:13px; border:1.5px solid var(--bordo); border-radius:10px; margin:12px 0 8px; }
+  label.ricorda { display:flex; gap:8px; align-items:center; color:var(--sec); font-size:14px; }
+  button { width:100%; font:inherit; font-size:17px; font-weight:600; color:#fff; background:var(--acc); border:0; border-radius:12px; padding:14px; margin-top:12px; }
+  .errore { color:#B91C1C; font-size:14px; min-height:18px; margin-top:8px; }
+  dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:15px; }
+  dt { color:var(--sec); } dd { margin:0; font-weight:600; text-align:right; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:99px; font-size:13px; font-weight:600; }
+  .ok { background:#DCFCE7; color:#166534; } .avviso { background:#FEF3C7; color:#78350F; }
+  .scaduta { background:#F3F4F6; color:#4B5563; }
+  .riepilogo { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { background:#EEF2FF; color:#3730A3; border-radius:99px; padding:4px 11px; font-size:14px; }
+  .intervento { border-top:1px solid var(--bordo); padding:12px 0; }
+  .intervento:first-of-type { border-top:0; padding-top:0; }
+  .data { font-weight:700; }
+  .riga { font-size:14px; margin-top:3px; } .riga span { color:var(--sec); }
+  .aggiornato { text-align:center; color:var(--sec); font-size:12px; margin-top:6px; }
+  a.esci { color:var(--sec); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="scheda" id="accesso">
+    <h1>Scheda tecnica</h1>
+    <p class="sotto" id="sn-accesso">Area riservata al personale tecnico</p>
+    <form id="modulo" autocomplete="off">
+      <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+      <label class="ricorda"><input type="checkbox" id="ricorda"> Ricorda su questo telefono</label>
+      <div class="errore" id="errore"></div>
+      <button type="submit">Apri la scheda</button>
+    </form>
+  </div>
+  <div id="contenuto" hidden></div>
+</main>
+<script>
+(function () {
+  var sn = (new URLSearchParams(location.search).get("s") || "").trim();
+  var el = function (id) { return document.getElementById(id); };
+  var CHIAVE = "gestionale_tecnico_pw";
+
+  function esc(t) {
+    return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) {
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function dataIt(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+    return m ? m[3] + "/" + m[2] + "/" + m[1] : (iso || "-");
+  }
+  function b64(s) {
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  async function nomeFile(s) {
+    var h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s.trim().toUpperCase()));
+    return Array.from(new Uint8Array(h)).map(function (b) {
+      return b.toString(16).padStart(2, "0");
+    }).join("").slice(0, 40);
+  }
+  async function decifra(busta, password) {
+    var base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+    var chiave = await crypto.subtle.deriveKey(
+      {name: "PBKDF2", salt: b64(busta.s), iterations: busta.i, hash: "SHA-256"},
+      base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
+    var chiaro = await crypto.subtle.decrypt({name: "AES-GCM", iv: b64(busta.n)}, chiave, b64(busta.d));
+    return JSON.parse(new TextDecoder().decode(chiaro));
+  }
+
+  function mostra(d) {
+    var badge = {"In garanzia": "ok", "In scadenza": "avviso", "Scaduta": "scaduta", "Da definire": "scaduta"}[d.stato_garanzia] || "scaduta";
+    var tot = {}, ordine = [];
+    (d.interventi || []).forEach(function (i) {
+      (i.ricambi || []).forEach(function (r) {
+        if (!(r.nome in tot)) { tot[r.nome] = 0; ordine.push(r.nome); }
+        tot[r.nome] += r.quantita;
+      });
+    });
+    var h = '<div class="scheda"><h1>' + esc(d.modello) + '</h1><p class="sotto">SN ' + esc(d.sn) + '</p></div>';
+    h += '<div class="scheda"><h2>Installazione e garanzia</h2><dl>';
+    if (d.cliente) h += '<dt>Cliente / sede</dt><dd>' + esc(d.cliente) + '</dd>';
+    if (d.regione) h += '<dt>Regione</dt><dd>' + esc(d.regione) + '</dd>';
+    h += '<dt>Arrivo in Italia</dt><dd>' + dataIt(d.arrivo) + '</dd>';
+    h += '<dt>Installazione</dt><dd>' + dataIt(d.installazione) + '</dd>';
+    h += '<dt>Fine garanzia</dt><dd>' + dataIt(d.fine_garanzia) + '</dd>';
+    h += '<dt>Stato</dt><dd><span class="badge ' + badge + '">' + esc(d.stato_garanzia) + '</span></dd>';
+    h += '</dl>';
+    if (d.note) h += '<p class="riga"><span>Note:</span> ' + esc(d.note) + '</p>';
+    h += '</div>';
+
+    h += '<div class="scheda"><h2>Pezzi cambiati in totale</h2>';
+    if (ordine.length) {
+      h += '<div class="riepilogo">' + ordine.map(function (n) {
+        return '<span class="chip">' + esc(n) + ' × ' + tot[n] + '</span>';
+      }).join("") + '</div>';
+    } else h += '<p class="sotto">Nessun ricambio sostituito.</p>';
+    h += '</div>';
+
+    var ints = d.interventi || [];
+    h += '<div class="scheda"><h2>Interventi (' + ints.length + ')</h2>';
+    if (!ints.length) h += '<p class="sotto">Nessun intervento registrato.</p>';
+    ints.forEach(function (i) {
+      h += '<div class="intervento"><div class="data">' + dataIt(i.data) + '</div>';
+      if (i.guasto) h += '<div class="riga"><span>Guasto:</span> ' + esc(i.guasto) + '</div>';
+      if (i.lavoro) h += '<div class="riga"><span>Lavoro:</span> ' + esc(i.lavoro) + '</div>';
+      if ((i.ricambi || []).length) h += '<div class="riga"><span>Ricambi:</span> ' + i.ricambi.map(function (r) {
+        return esc(r.nome) + ' × ' + r.quantita;
+      }).join(", ") + '</div>';
+      if (i.note) h += '<div class="riga"><span>Note:</span> ' + esc(i.note) + '</div>';
+      h += '</div>';
+    });
+    h += '</div>';
+    h += '<p class="aggiornato">Dati aggiornati al ' + esc(d.aggiornato) + '<br><a class="esci" href="#" id="esci">Esci e dimentica la password</a></p>';
+
+    el("contenuto").innerHTML = h;
+    el("contenuto").hidden = false;
+    el("accesso").hidden = true;
+    el("esci").addEventListener("click", function (e) {
+      e.preventDefault();
+      try { localStorage.removeItem(CHIAVE); } catch (x) {}
+      location.reload();
+    });
+  }
+
+  async function apri(password, ricorda) {
+    var err = el("errore");
+    err.textContent = "";
+    if (!sn) { err.textContent = "Codice QR non valido: manca il numero seriale."; return; }
+    if (!password) { err.textContent = "Scrivi la password."; return; }
+    var tasto = document.querySelector("button");
+    tasto.disabled = true; tasto.textContent = "Verifico...";
+    try {
+      var nome = await nomeFile(sn);
+      var r = await fetch("dati/" + nome + ".json?t=" + Date.now(), {cache: "no-store"});
+      if (r.status === 404) {
+        err.textContent = "Scheda non ancora disponibile per questo strumento.";
+        return;
+      }
+      if (!r.ok) { err.textContent = "Errore di rete (" + r.status + "). Riprova."; return; }
+      var busta = await r.json();
+      var dati;
+      try { dati = await decifra(busta, password); }
+      catch (x) {
+        err.textContent = "Password errata.";
+        try { localStorage.removeItem(CHIAVE); } catch (y) {}
+        return;
+      }
+      if (ricorda) { try { localStorage.setItem(CHIAVE, password); } catch (y) {} }
+      mostra(dati);
+    } catch (x) {
+      err.textContent = "Impossibile aprire la scheda. Controlla la connessione.";
+    } finally {
+      tasto.disabled = false; tasto.textContent = "Apri la scheda";
+    }
+  }
+
+  if (sn) el("sn-accesso").textContent = "SN " + sn + " - area riservata al personale tecnico";
+  el("modulo").addEventListener("submit", function (e) {
+    e.preventDefault();
+    apri(el("password").value, el("ricorda").checked);
+  });
+  var salvata = null;
+  try { salvata = localStorage.getItem(CHIAVE); } catch (x) {}
+  if (salvata) { el("ricorda").checked = true; apri(salvata, true); }
+})();
+</script>
+</body>
+</html>
