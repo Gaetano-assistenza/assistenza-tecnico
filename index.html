@@ -95,6 +95,7 @@
     h += '<div class="scheda"><h2>Installazione e garanzia</h2><dl>';
     if (d.cliente) h += '<dt>Cliente / sede</dt><dd>' + esc(d.cliente) + '</dd>';
     if (d.regione) h += '<dt>Regione</dt><dd>' + esc(d.regione) + '</dd>';
+    if (d.tipologia) h += '<dt>Tipologia</dt><dd>' + esc(d.tipologia) + '</dd>';
     h += '<dt>Arrivo in Italia</dt><dd>' + dataIt(d.arrivo) + '</dd>';
     h += '<dt>Installazione</dt><dd>' + dataIt(d.installazione) + '</dd>';
     h += '<dt>Fine garanzia</dt><dd>' + dataIt(d.fine_garanzia) + '</dd>';
